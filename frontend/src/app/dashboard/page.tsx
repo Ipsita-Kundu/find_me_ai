@@ -71,7 +71,9 @@ export default function DashboardPage() {
         gender: (item.gender as "Male" | "Female" | "Other") ?? undefined,
         location: item.last_seen_location ?? undefined,
         description: item.additional_info || "No additional description.",
-        imageUrl: `${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"}/${item.image_path.replace(/\\/g, "/")}`,
+        imageUrl: item.image_path.startsWith("http")
+          ? item.image_path
+          : `${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"}/${item.image_path.replace(/\\/g, "/")}`,
       })),
     [missingReports],
   );
@@ -83,7 +85,9 @@ export default function DashboardPage() {
         name: "Found Person",
         location: item.found_location ?? undefined,
         description: item.additional_info || "No additional description.",
-        imageUrl: `${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"}/${item.image_path.replace(/\\/g, "/")}`,
+        imageUrl: item.image_path.startsWith("http")
+          ? item.image_path
+          : `${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"}/${item.image_path.replace(/\\/g, "/")}`,
         contact: item.contact_info ?? undefined,
       })),
     [foundReports],
