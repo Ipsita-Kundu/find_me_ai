@@ -2,8 +2,11 @@ import type {
   BackendAlert,
   BackendFoundReport,
   BackendMissingReport,
+  ContactRevealResponse,
   CreateFoundPayload,
   CreateMissingPayload,
+  CreateMissingResponse,
+  MatchDetail,
 } from "@/types";
 import { alertsMock, foundPersonsMock, missingPersonsMock } from "@/mock-data";
 
@@ -127,6 +130,7 @@ export async function signupWithEmail(payload: {
   name: string;
   email: string;
   password: string;
+  phone_number: string;
   role: "user" | "authority";
 }): Promise<AuthResponse> {
   if (USE_MOCK_API) {
@@ -220,21 +224,26 @@ export async function getMe(token: string): Promise<AuthUser> {
 export async function createMissingReport(
   payload: CreateMissingPayload,
   token: string,
-): Promise<void> {
+): Promise<CreateMissingResponse> {
   if (USE_MOCK_API) {
     await sleep(350);
     if (!decodeMockToken(token)) {
       throw new Error("You are not authenticated. Please login again.");
     }
     void payload;
-    return;
+    return { report_id: "mock-id", matches: [], match_details: [] };
   }
 
   const formData = new FormData();
   formData.append("name", payload.name);
   formData.append("age", payload.age);
   formData.append("gender", payload.gender);
-  formData.append("last_seen_location", payload.lastSeenLocation);
+  if (payload.birthmarks?.trim()) {
+    formData.append("birthmarks", payload.birthmarks.trim());
+  }
+  if (payload.lastSeenLocation.trim()) {
+    formData.append("last_seen_location", payload.lastSeenLocation.trim());
+  }
   formData.append("additional_info", payload.description);
   formData.append("image", payload.image);
 
@@ -243,7 +252,7 @@ export async function createMissingReport(
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
   });
-  await parseResponse<Record<string, unknown>>(response);
+  return parseResponse<CreateMissingResponse>(response);
 }
 
 export async function createFoundReport(
@@ -260,6 +269,15 @@ export async function createFoundReport(
   }
 
   const formData = new FormData();
+  if (payload.age?.trim()) {
+    formData.append("estimated_age", payload.age.trim());
+  }
+  if (payload.gender?.trim()) {
+    formData.append("gender", payload.gender.trim());
+  }
+  if (payload.birthmarks?.trim()) {
+    formData.append("birthmarks", payload.birthmarks.trim());
+  }
   formData.append("found_location", payload.location);
   formData.append("contact_info", payload.contact);
   formData.append("additional_info", payload.description);
@@ -294,6 +312,24 @@ export async function fetchMissingReports(
   return payload.missing_reports;
 }
 
+export async function fetchMyMissingReports(
+  token: string,
+): Promise<BackendMissingReport[]> {
+  if (USE_MOCK_API) {
+    await sleep(220);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return toBackendMissingReport();
+  }
+
+  const response = await fetch(`${API_BASE_URL}/missing/mine`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseResponse<BackendMissingReport[]>(response);
+}
+
 export async function fetchFoundReports(
   token: string,
 ): Promise<BackendFoundReport[]> {
@@ -315,6 +351,24 @@ export async function fetchFoundReports(
   return payload.found_reports;
 }
 
+export async function fetchMyFoundReports(
+  token: string,
+): Promise<BackendFoundReport[]> {
+  if (USE_MOCK_API) {
+    await sleep(220);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return toBackendFoundReport();
+  }
+
+  const response = await fetch(`${API_BASE_URL}/found/mine`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseResponse<BackendFoundReport[]>(response);
+}
+
 export async function fetchAlerts(token: string): Promise<BackendAlert[]> {
   if (USE_MOCK_API) {
     await sleep(250);
@@ -330,4 +384,151 @@ export async function fetchAlerts(token: string): Promise<BackendAlert[]> {
   });
   const payload = await parseResponse<{ alerts: BackendAlert[] }>(response);
   return payload.alerts;
+}
+
+export async function fetchMyAlerts(token: string): Promise<BackendAlert[]> {
+  if (USE_MOCK_API) {
+    await sleep(250);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return toBackendAlerts();
+  }
+
+  const response = await fetch(`${API_BASE_URL}/auth/my-alerts`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await parseResponse<{ alerts: BackendAlert[] }>(response);
+  return payload.alerts;
+}
+
+export async function markAlertRead(
+  alertId: string,
+  token: string,
+): Promise<void> {
+  if (USE_MOCK_API) return;
+  await fetch(`${API_BASE_URL}/auth/alerts/${alertId}/read`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function markAllAlertsRead(token: string): Promise<void> {
+  if (USE_MOCK_API) return;
+  await fetch(`${API_BASE_URL}/auth/alerts/read-all`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function clearAllAlerts(token: string): Promise<void> {
+  if (USE_MOCK_API) return;
+  await fetch(`${API_BASE_URL}/auth/alerts/clear`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function resetDatabase(token: string): Promise<{
+  deleted: { missing_reports: number; found_reports: number; alerts: number };
+}> {
+  const response = await fetch(`${API_BASE_URL}/admin/reset-database`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseResponse(response);
+}
+
+export async function fetchMatchesForReport(
+  reportId: string,
+  token: string,
+): Promise<{ matches: MatchDetail[]; missingName: string; missingImagePath: string | null }> {
+  if (USE_MOCK_API) {
+    await sleep(250);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return { matches: [], missingName: "Unknown", missingImagePath: null };
+  }
+
+  const response = await fetch(`${API_BASE_URL}/missing/${reportId}/matches`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await parseResponse<{
+    report_id: string;
+    missing_name: string;
+    missing_image_path: string | null;
+    matches: MatchDetail[];
+  }>(response);
+  return {
+    matches: data.matches,
+    missingName: data.missing_name ?? "Unknown",
+    missingImagePath: data.missing_image_path ?? null,
+  };
+}
+
+export async function deleteMissingReport(
+  reportId: string,
+  token: string,
+): Promise<void> {
+  if (USE_MOCK_API) {
+    await sleep(200);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/missing/${reportId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await parseResponse<{ message: string }>(response);
+}
+
+export async function deleteFoundReport(
+  reportId: string,
+  token: string,
+): Promise<void> {
+  if (USE_MOCK_API) {
+    await sleep(200);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/found/${reportId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  await parseResponse<{ message: string }>(response);
+}
+
+export async function revealContact(
+  alertId: string,
+  token: string,
+): Promise<ContactRevealResponse> {
+  if (USE_MOCK_API) {
+    await sleep(200);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return {
+      finder_name: "Mock User",
+      finder_phone: "+1234567890",
+      similarity: 0.85,
+    };
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/auth/alerts/${alertId}/contact`,
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  return parseResponse<ContactRevealResponse>(response);
 }

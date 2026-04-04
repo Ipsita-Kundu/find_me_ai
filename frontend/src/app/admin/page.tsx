@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import AppNavbar from "@/components/AppNavbar";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -11,6 +11,7 @@ import {
   fetchAlerts,
   fetchFoundReports,
   fetchMissingReports,
+  resetDatabase,
 } from "@/services/api";
 
 const statusStyles = {
@@ -32,17 +33,21 @@ export default function AdminDashboardPage() {
   const [alerts, setAlerts] = useState<Awaited<ReturnType<typeof fetchAlerts>>>(
     [],
   );
+  const [resetting, setResetting] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
 
-  useEffect(() => {
-    const loadAdminData = async () => {
+  const loadAdminData = useCallback(
+    async (silent = false) => {
       if (!token) {
         setError("Authentication required. Please login again.");
         setLoading(false);
         return;
       }
 
-      setLoading(true);
-      setError("");
+      if (!silent) {
+        setLoading(true);
+        setError("");
+      }
       try {
         const [missing, found, alertsData] = await Promise.all([
           fetchMissingReports(token),
@@ -53,18 +58,46 @@ export default function AdminDashboardPage() {
         setFoundReports(found);
         setAlerts(alertsData);
       } catch (loadError) {
-        const message =
-          loadError instanceof Error
-            ? loadError.message
-            : "Failed to load admin data.";
-        setError(message);
+        if (!silent) {
+          const message =
+            loadError instanceof Error
+              ? loadError.message
+              : "Failed to load admin data.";
+          setError(message);
+        }
       } finally {
         setLoading(false);
       }
-    };
+    },
+    [token],
+  );
 
+  // Initial load + poll every 10s
+  useEffect(() => {
     void loadAdminData();
-  }, [token]);
+    const interval = setInterval(() => void loadAdminData(true), 10_000);
+    return () => clearInterval(interval);
+  }, [loadAdminData]);
+
+  const handleReset = async () => {
+    if (!resetConfirm) {
+      setResetConfirm(true);
+      return;
+    }
+    if (!token) return;
+    setResetting(true);
+    try {
+      await resetDatabase(token);
+      setMissingReports([]);
+      setFoundReports([]);
+      setAlerts([]);
+      setResetConfirm(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to reset.");
+    } finally {
+      setResetting(false);
+    }
+  };
 
   const adminCases = useMemo(() => {
     const missingCases = missingReports.map((item) => ({
@@ -92,7 +125,11 @@ export default function AdminDashboardPage() {
     () =>
       alerts.map((item) => ({
         id: item._id,
-        confidence: Number((item.similarity * 100).toFixed(1)),
+        confidence: Number(((item.similarity ?? 0) * 100).toFixed(1)),
+        faceScore: Number(((item.scoring?.face_score ?? 0) * 100).toFixed(1)),
+        metadataScore: Number(
+          ((item.scoring?.metadata_score ?? 0) * 100).toFixed(1),
+        ),
         location: "AI matching event",
         contactInfo: `Missing ID: ${item.missing_id} | Found ID: ${item.found_id}`,
       })),
@@ -112,6 +149,33 @@ export default function AdminDashboardPage() {
               Monitor case evidence feeds, active alerts, and legal workflow
               statuses.
             </p>
+            <div className="mt-3 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void handleReset()}
+                disabled={resetting}
+                className={`rounded-lg px-4 py-2 text-xs font-bold shadow transition ${
+                  resetConfirm
+                    ? "bg-red-600 text-white hover:bg-red-700"
+                    : "bg-white border border-red-300 text-red-600 hover:bg-red-50"
+                } disabled:opacity-60`}
+              >
+                {resetting
+                  ? "Resetting..."
+                  : resetConfirm
+                    ? "Click again to confirm reset"
+                    : "Reset Database"}
+              </button>
+              {resetConfirm && (
+                <button
+                  type="button"
+                  onClick={() => setResetConfirm(false)}
+                  className="text-xs text-slate-500 hover:text-slate-700"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
             {error ? (
               <div className="mt-4">
                 <Toast message={error} tone="error" />
@@ -207,6 +271,10 @@ export default function AdminDashboardPage() {
                       </p>
                       <p className="mt-1 text-sm text-slate-800">
                         Confidence: {alert.confidence.toFixed(1)}%
+                      </p>
+                      <p className="text-xs text-slate-600">
+                        Face: {alert.faceScore.toFixed(1)}% | Metadata:{" "}
+                        {alert.metadataScore.toFixed(1)}%
                       </p>
                       <p className="text-sm text-slate-700">{alert.location}</p>
                       <p className="text-xs text-slate-600">

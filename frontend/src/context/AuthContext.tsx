@@ -27,6 +27,7 @@ interface AuthContextValue {
   signup: (
     name: string,
     email: string,
+    phoneNumber: string,
     password: string,
     role: "user" | "authority",
   ) => Promise<AuthUser>;
@@ -45,8 +46,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      const storedUser = localStorage.getItem(AUTH_STORAGE_KEY);
-      const storedToken = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+      const storedUser = sessionStorage.getItem(AUTH_STORAGE_KEY);
+      const storedToken = sessionStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
 
       if (storedUser && storedToken) {
         try {
@@ -54,16 +55,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(parsedUser);
           setToken(storedToken);
           void getMe(storedToken).catch(() => {
-            localStorage.removeItem(AUTH_STORAGE_KEY);
-            localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+            sessionStorage.removeItem(AUTH_STORAGE_KEY);
+            sessionStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
             setUser(null);
             setToken(null);
           });
         } catch {
-          localStorage.removeItem(AUTH_STORAGE_KEY);
-          localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+          sessionStorage.removeItem(AUTH_STORAGE_KEY);
+          sessionStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
         }
       }
+
+      // Remove legacy persistent auth keys from older builds.
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+
       setInitialized(true);
     }, 0);
 
@@ -73,8 +79,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const persistAuth = useCallback((nextUser: AuthUser, nextToken: string) => {
     setUser(nextUser);
     setToken(nextToken);
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextUser));
-    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, nextToken);
+    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextUser));
+    sessionStorage.setItem(AUTH_TOKEN_STORAGE_KEY, nextToken);
   }, []);
 
   const login = useCallback(
@@ -99,10 +105,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (
       name: string,
       email: string,
+      phoneNumber: string,
       password: string,
       role: "user" | "authority",
     ) => {
-      const response = await signupWithEmail({ name, email, password, role });
+      const response = await signupWithEmail({
+        name,
+        email,
+        phone_number: phoneNumber,
+        password,
+        role,
+      });
       persistAuth(response.user, response.access_token);
       return response.user;
     },
@@ -117,8 +130,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(() => {
     setUser(null);
     setToken(null);
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+    sessionStorage.removeItem(AUTH_STORAGE_KEY);
+    sessionStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -136,7 +149,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [
       getDefaultDashboardPath,
       initialized,
-      login,
       loginWithGoogleToken,
       logout,
       signup,

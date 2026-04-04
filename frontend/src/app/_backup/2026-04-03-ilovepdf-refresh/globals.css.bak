@@ -1,16 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f5f7fb;
-  --foreground: #0f172a;
-  --brand: #e11d48;
+  --background: #f7fbff;
+  --foreground: #111827;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0b10;
-    --foreground: #f8fafc;
-    --brand: #fb7185;
+    --background: #0a1220;
+    --foreground: #edf4ff;
   }
 }
 
@@ -84,16 +82,4 @@ body {
 .feature-card:hover {
   transform: translateY(-4px);
   box-shadow: 0 14px 30px -18px rgba(15, 23, 42, 0.45);
-}
-
-.home-card {
-  transition:
-    transform 180ms ease,
-    box-shadow 180ms ease,
-    border-color 180ms ease;
-}
-
-.home-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 16px 28px -22px rgba(15, 23, 42, 0.38);
 }

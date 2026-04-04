@@ -1,295 +1,373 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import AppNavbar from "@/components/AppNavbar";
-import AuthPromptModal from "@/components/AuthPromptModal";
-import Carousel from "@/components/Carousel";
+import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { useAuth } from "@/context/AuthContext";
 
 export default function HomePage() {
-  const { isAuthenticated, initialized } = useAuth();
-  const [dismissedPrompt, setDismissedPrompt] = useState(false);
-  const showAuthPrompt = initialized && !isAuthenticated && !dismissedPrompt;
+  const router = useRouter();
+  const { initialized, isAuthenticated, getDefaultDashboardPath } = useAuth();
+  const [redirecting, setRedirecting] = useState(false);
 
-  const features = [
-    {
-      title: "Face Match Engine",
-      desc: "Generate robust embeddings and compare live feeds against registered profiles in seconds.",
-      icon: "AI",
-    },
-    {
-      title: "Multi-Camera Ingestion",
-      desc: "Track multiple camera streams in parallel with confidence scoring and event snapshots.",
-      icon: "CAM",
-    },
-    {
-      title: "Instant Alerts",
-      desc: "Push high-confidence detections to operators with actionable context and timestamps.",
-      icon: "ALRT",
-    },
-    {
-      title: "Secure Case Storage",
-      desc: "Keep sensitive records protected with audited access patterns and encrypted persistence.",
-      icon: "SAFE",
-    },
-  ];
+  useEffect(() => {
+    if (!initialized || !isAuthenticated) {
+      setRedirecting(false);
+      return;
+    }
 
-  const steps = [
-    "Upload missing person image",
-    "Create embedding profile",
-    "Scan CCTV streams",
-    "Flag likely matches",
-    "Notify response team",
+    const currentHash =
+      typeof window !== "undefined" ? window.location.hash.trim() : "";
+
+    if (currentHash.length > 0) {
+      setRedirecting(false);
+      return;
+    }
+
+    setRedirecting(true);
+    const timer = window.setTimeout(() => {
+      router.replace(getDefaultDashboardPath());
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [getDefaultDashboardPath, initialized, isAuthenticated, router]);
+
+  if (!initialized) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <LoadingSpinner label="Loading..." />
+      </div>
+    );
+  }
+
+  if (redirecting) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <LoadingSpinner label="Redirecting to your dashboard..." />
+      </div>
+    );
+  }
+
+  const primaryActions = [
+    {
+      title: "Report Missing",
+      description:
+        "Create a missing report and let AI search reports posted by other users.",
+      href: "/report-missing",
+      cta: "Start Missing Report",
+      tone: "primary",
+    },
+    {
+      title: "Report Found",
+      description:
+        "Submit a found-person report so families can discover a potential match.",
+      href: "/report-found",
+      cta: "Start Found Report",
+      tone: "secondary",
+    },
+  ] as const;
+
+  const toolCards = [
+    {
+      title: "Create Missing Case",
+      desc: "Open a complete missing-person report workflow.",
+      href: "/report-missing",
+      badge: "Report",
+    },
+    {
+      title: "Create Found Case",
+      desc: "Capture location and evidence from found-person cases.",
+      href: "/report-found",
+      badge: "Report",
+    },
+    {
+      title: "Track Case Status",
+      desc: "View current progress and updates for all active reports.",
+      href: "/dashboard",
+      badge: "Dashboard",
+    },
+    {
+      title: "AI Match Results",
+      desc: "Review possible matches generated from reports by other users.",
+      href: "/dashboard",
+      badge: "Matching",
+    },
+    {
+      title: "Cross-User Matches",
+      desc: "Open your match feed and evaluate confidence-based suggestions.",
+      href: "/dashboard",
+      badge: "Matching",
+    },
+    {
+      title: "Send Contact Request",
+      desc: "Request safe follow-up when a match looks promising.",
+      href: "/dashboard",
+      badge: "Connect",
+    },
+    {
+      title: "Authority Login",
+      desc: "Sign in with assigned role to access secure actions.",
+      href: "/login",
+      badge: "Access",
+    },
+    {
+      title: "Create Team Account",
+      desc: "Onboard volunteers, NGOs, and response teams quickly.",
+      href: "/signup",
+      badge: "Access",
+    },
+    {
+      title: "Admin Control Center",
+      desc: "Moderate cases, users, and approvals with guardrails.",
+      href: "/admin",
+      badge: "Admin",
+    },
   ];
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_#dff4ff_0%,_#f6fbff_42%,_#fff9ef_100%)] text-slate-900">
+    <div
+      id="home"
+      className="min-h-screen bg-[radial-gradient(circle_at_top_right,_#dff4ff_0%,_#f7fbff_45%,_#fff7ef_100%)] dark:bg-[radial-gradient(circle_at_top_right,_#102032_0%,_#0c1523_45%,_#0a121e_100%)] dark:text-slate-100 text-slate-900"
+    >
       <AppNavbar />
-      <AuthPromptModal
-        open={showAuthPrompt}
-        onClose={() => setDismissedPrompt(true)}
-      />
 
-      <section
-        id="home"
-        className="relative overflow-hidden pt-28 pb-20 px-6 md:px-10"
-      >
-        <div className="pointer-events-none absolute -top-16 -left-16 h-56 w-56 rounded-full bg-cyan-300/40 blur-3xl drift-slow"></div>
-        <div className="pointer-events-none absolute top-20 right-4 h-60 w-60 rounded-full bg-amber-200/40 blur-3xl drift-slower"></div>
-
-        <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[1.2fr_0.8fr]">
-          <div className="reveal-up">
-            <p className="mb-5 inline-flex items-center rounded-full border border-slate-300/70 bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.22em] text-slate-700 shadow-sm">
-              FindMe AI Response Platform
-            </p>
-            <h1 className="text-4xl font-extrabold leading-tight md:text-6xl">
-              Faster Match Detection for
-              <span className="block bg-gradient-to-r from-cyan-700 via-sky-600 to-amber-500 bg-clip-text text-transparent">
-                Missing Person Cases
-              </span>
-            </h1>
-            <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-700 md:text-xl">
-              A realtime workflow for agencies to upload case photos, monitor
-              live camera feeds, and receive ranked match alerts with traceable
-              confidence.
-            </p>
-
-            <div className="mt-9 flex flex-wrap gap-4">
-              <Link
-                href="/report-missing"
-                className="rounded-full bg-slate-900 px-7 py-3 text-sm font-semibold text-white shadow-xl transition hover:-translate-y-0.5 hover:bg-slate-800"
-              >
-                Report Missing Person
-              </Link>
-              <Link
-                href="/report-found"
-                className="rounded-full border border-slate-300 bg-white/90 px-7 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-400"
-              >
-                Report Found Person
-              </Link>
-              <a
-                href="#features"
-                className="rounded-full border border-slate-300 bg-white/90 px-7 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-400"
-              >
-                Explore Features
-              </a>
-            </div>
-
-            <div className="mt-10 grid max-w-xl grid-cols-3 gap-3 text-left">
-              {[
-                { label: "Avg Match Latency", value: "< 4s" },
-                { label: "Concurrent Streams", value: "24+" },
-                { label: "Alert Precision", value: "95%" },
-              ].map((metric) => (
-                <div
-                  key={metric.label}
-                  className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur"
-                >
-                  <p className="text-lg font-extrabold text-slate-900">
-                    {metric.value}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-600">{metric.label}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="reveal-up delay-1 rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-[0_20px_65px_-35px_rgba(15,23,42,0.45)] backdrop-blur">
-            <p className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500">
-              Live Case Snapshot
-            </p>
-            <div className="mt-5 rounded-2xl bg-slate-900 p-5 text-slate-100">
-              <div className="mb-4 flex items-center justify-between text-xs text-slate-300">
-                <span>Camera: STN-12</span>
-                <span>Confidence: 92.3%</span>
-              </div>
-              <div className="rounded-xl border border-cyan-300/50 bg-slate-800 p-4 pulse-soft">
-                <p className="text-sm text-cyan-200">
-                  Potential match detected in corridor feed
-                </p>
-                <p className="mt-2 text-xs text-slate-300">
-                  Matched profile: Case #D-1192
-                </p>
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-200">
-                <div className="rounded-lg bg-slate-800 p-3">
-                  Embedding Drift: 0.07
-                </div>
-                <div className="rounded-lg bg-slate-800 p-3">
-                  Frame Age: 2.1s
-                </div>
-              </div>
-            </div>
-            <p className="mt-4 text-sm leading-relaxed text-slate-600">
-              Operators can verify evidence quickly and escalate only
-              high-signal detections.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section className="px-6 pb-8 md:px-10">
-        <div className="mx-auto max-w-7xl reveal-up delay-2 rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-[0_24px_70px_-45px_rgba(15,23,42,0.5)]">
-          <p className="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">
-            Interface Preview
+      <section className="px-5 pb-10 pt-16 md:px-10 md:pb-14 md:pt-20">
+        <div className="mx-auto max-w-6xl text-center">
+          <p className="inline-flex rounded-full border border-cyan-200 bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-700">
+            FindMe AI Utility Hub
           </p>
-          <Carousel />
+          <h1 className="mx-auto mt-4 max-w-4xl text-4xl font-black leading-tight md:text-6xl">
+            Find and match missing cases faster in one workflow
+          </h1>
+          <p className="mx-auto mt-4 max-w-3xl text-sm leading-relaxed text-slate-600 md:text-base">
+            Inspired by utility-first platforms, FindMe AI helps users publish
+            reports, discover cross-user matches, and coordinate safe follow-up.
+          </p>
         </div>
       </section>
 
-      <section id="features" className="px-6 py-20 md:px-10">
-        <div className="mx-auto max-w-7xl">
-          <div className="mb-12 flex flex-wrap items-end justify-between gap-4">
-            <h2 className="text-3xl font-extrabold md:text-4xl">
-              System Capabilities
-            </h2>
-            <p className="max-w-xl text-slate-700">
-              Built for real operations where speed, explainability, and
-              decision confidence are mandatory.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
-            {features.map((feature) => (
-              <article
-                key={feature.title}
-                className="feature-card rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-sm"
+      <section className="px-5 pb-10 md:px-10 md:pb-14">
+        <div className="mx-auto grid max-w-6xl gap-4 md:grid-cols-2">
+          {primaryActions.map((action) => (
+            <article
+              key={action.title}
+              className={`home-card h-full rounded-2xl border p-6 md:p-7 ${action.tone === "primary" ? "border-cyan-600 bg-cyan-600 text-white" : "border-slate-200 bg-white text-slate-900"}`}
+            >
+              <h2 className="text-2xl font-extrabold md:text-3xl">
+                {action.title}
+              </h2>
+              <p
+                className={`mt-3 text-sm leading-relaxed ${action.tone === "primary" ? "text-cyan-50" : "text-slate-600"}`}
               >
-                <div className="mb-4 inline-flex rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold tracking-[0.12em] text-white">
-                  {feature.icon}
-                </div>
-                <h3 className="text-xl font-extrabold text-slate-900">
-                  {feature.title}
+                {action.description}
+              </p>
+              <Link
+                href={action.href}
+                className={`mt-6 inline-flex rounded-xl px-4 py-2.5 text-sm font-bold transition ${action.tone === "primary" ? "bg-white text-cyan-700 hover:bg-cyan-50" : "border border-slate-300 bg-white text-slate-800 hover:border-slate-400"}`}
+              >
+                {action.cta}
+              </Link>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section id="services" className="px-5 pb-10 md:px-10 md:pb-14">
+        <div className="mx-auto max-w-6xl">
+          <div className="mb-4 flex flex-wrap justify-center gap-2 md:mb-6">
+            {["All Actions", "Report", "Matching", "Dashboard", "Connect"].map(
+              (tab, index) => (
+                <button
+                  key={tab}
+                  type="button"
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${index === 0 ? "border-cyan-200 bg-cyan-50 text-cyan-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
+                >
+                  {tab}
+                </button>
+              ),
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {toolCards.map((tool) => (
+              <Link
+                key={tool.title}
+                href={tool.href}
+                className="home-card group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-cyan-200"
+              >
+                <span className="inline-flex rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 group-hover:bg-cyan-50 group-hover:text-cyan-700">
+                  {tool.badge}
+                </span>
+                <h3 className="mt-3 text-base font-bold text-slate-900">
+                  {tool.title}
                 </h3>
-                <p className="mt-3 text-sm leading-relaxed text-slate-600">
-                  {feature.desc}
+                <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                  {tool.desc}
                 </p>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="px-5 pb-12 md:px-10">
+        <div className="mx-auto max-w-6xl rounded-2xl border border-slate-200 bg-white p-6 md:p-7">
+          <h2 className="text-center text-2xl font-extrabold text-slate-900 md:text-3xl">
+            How Matching Works
+          </h2>
+          <div className="mt-6 grid gap-3 md:grid-cols-3">
+            {[
+              {
+                title: "1. Submit Report",
+                desc: "Add photo and details in a guided report form.",
+              },
+              {
+                title: "2. AI Finds Similar Cases",
+                desc: "Your report is compared against other user submissions.",
+              },
+              {
+                title: "3. Connect Safely",
+                desc: "Review confidence and request secure follow-up.",
+              },
+            ].map((step) => (
+              <article
+                key={step.title}
+                className="rounded-xl border border-slate-200 bg-slate-50 p-4"
+              >
+                <h3 className="text-sm font-bold text-slate-900">
+                  {step.title}
+                </h3>
+                <p className="mt-1 text-sm text-slate-600">{step.desc}</p>
               </article>
             ))}
           </div>
         </div>
       </section>
 
-      <section className="border-y border-slate-200/70 bg-white/70 px-6 py-20 backdrop-blur md:px-10">
-        <div className="mx-auto max-w-7xl">
-          <h2 className="text-center text-3xl font-extrabold md:text-4xl">
-            How It Works
-          </h2>
-          <div className="mt-12 grid grid-cols-1 gap-4 md:grid-cols-5">
-            {steps.map((step, idx) => (
-              <div
-                key={step}
-                className="rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-sm"
-              >
-                <p className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-cyan-100 text-sm font-extrabold text-cyan-700">
-                  {idx + 1}
-                </p>
-                <p className="text-sm font-semibold text-slate-800">{step}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section id="about" className="px-6 py-20 md:px-10">
-        <div className="mx-auto grid max-w-7xl gap-8 lg:grid-cols-2">
-          <div className="rounded-3xl border border-slate-200 bg-white/90 p-8 shadow-sm">
-            <h2 className="text-3xl font-extrabold">About This Initiative</h2>
-            <p className="mt-5 leading-relaxed text-slate-700">
-              FindMe AI focuses on reducing time-to-response in missing person
-              investigations. The platform combines a FastAPI backend,
-              operational dashboards, and model-assisted matching into one
-              streamlined decision system.
-            </p>
-            <p className="mt-4 leading-relaxed text-slate-700">
-              The goal is simple: convert fragmented surveillance data into
-              reliable leads that teams can act on quickly.
-            </p>
-          </div>
-          <div className="rounded-3xl border border-slate-200 bg-slate-900 p-8 text-slate-100 shadow-sm">
-            <h3 className="text-2xl font-extrabold">Why It Matters</h3>
-            <ul className="mt-5 space-y-3 text-sm leading-relaxed text-slate-200">
-              <li>
-                Prioritizes high-confidence detections to avoid alert fatigue.
-              </li>
-              <li>
-                Preserves searchable evidence trails for audit and review.
-              </li>
-              <li>
-                Supports faster coordination between field teams and control
-                rooms.
-              </li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <section id="contact" className="px-6 pb-20 md:px-10">
-        <div className="mx-auto max-w-7xl rounded-3xl bg-gradient-to-r from-slate-900 via-cyan-950 to-slate-900 p-10 text-center text-white shadow-2xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">
-            Deployment Ready
-          </p>
-          <h2 className="mt-4 text-3xl font-extrabold md:text-4xl">
-            Start Improving Case Resolution Speed
-          </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-slate-200 md:text-base">
-            Launch your pilot with secure onboarding, stream configuration, and
-            end-to-end monitoring workflows.
-          </p>
-          <div className="mt-8 flex flex-wrap justify-center gap-4">
-            <Link
-              href="/login"
-              className="rounded-full bg-white px-7 py-3 text-sm font-semibold text-slate-900 transition hover:-translate-y-0.5 hover:bg-slate-100"
+      <section className="border-y border-slate-200 bg-white/80 px-5 py-8 md:px-10">
+        <div className="mx-auto grid max-w-6xl gap-3 text-center sm:grid-cols-3">
+          {[
+            {
+              title: "For Authorities",
+              desc: "Role-based access and audit-ready records.",
+            },
+            {
+              title: "For Volunteers",
+              desc: "Quick, guided steps to report and verify.",
+            },
+            {
+              title: "For Teams",
+              desc: "Shared dashboards for coordinated response.",
+            },
+          ].map((item) => (
+            <div
+              key={item.title}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-5"
             >
-              Login / Sign Up
-            </Link>
+              <p className="font-bold text-slate-900">{item.title}</p>
+              <p className="mt-1 text-sm text-slate-600">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section id="about" className="px-5 py-12 md:px-10">
+        <div className="mx-auto grid max-w-6xl gap-4 md:grid-cols-[1.35fr_0.65fr]">
+          <article className="rounded-2xl border border-slate-200 bg-white p-6 md:p-7">
+            <h2 className="text-2xl font-extrabold md:text-3xl">
+              Trusted to handle sensitive case workflows
+            </h2>
+            <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-600 md:text-base">
+              FindMe AI keeps high-pressure case coordination practical with
+              secure access, transparent activity, and AI-assisted matching
+              support.
+            </p>
+            <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {[
+                { value: "24/7", label: "Case Intake" },
+                { value: "95%", label: "Review Accuracy" },
+                { value: "<4s", label: "Avg Match Lookup" },
+                { value: "RBAC", label: "Controlled Access" },
+              ].map((stat) => (
+                <div
+                  key={stat.label}
+                  className="rounded-xl bg-slate-50 px-3 py-4 text-center"
+                >
+                  <p className="text-lg font-black text-slate-900">
+                    {stat.value}
+                  </p>
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                    {stat.label}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <aside className="rounded-2xl border border-cyan-200 bg-cyan-50 p-6 md:p-7">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-700">
+              Get Started
+            </p>
+            <h3 className="mt-2 text-2xl font-extrabold text-slate-900">
+              Set up your response team
+            </h3>
+            <p className="mt-3 text-sm leading-relaxed text-slate-700">
+              Create an account, assign roles, and begin reporting cases in a
+              clean operational flow.
+            </p>
+            <div className="mt-5 space-y-2.5">
+              <Link
+                href="/signup"
+                className="block rounded-xl bg-cyan-600 px-4 py-2.5 text-center text-sm font-bold text-white transition hover:bg-cyan-700"
+              >
+                Create Account
+              </Link>
+              <Link
+                href="/login"
+                className="block rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-center text-sm font-bold text-slate-800 transition hover:border-slate-400"
+              >
+                Login
+              </Link>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="contact" className="px-5 pb-12 md:px-10">
+        <div className="mx-auto flex max-w-6xl flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-6 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-cyan-700">
+              Contact
+            </p>
+            <h3 className="mt-1 text-xl font-extrabold text-slate-900 md:text-2xl">
+              Need onboarding support?
+            </h3>
+            <p className="mt-1 text-sm text-slate-600">
+              We can help your team set up deployment and workflow training.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <a
               href="mailto:team@findme.ai"
-              className="rounded-full border border-slate-400 px-7 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:border-slate-200"
+              className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800"
             >
-              Contact Team
+              team@findme.ai
+            </a>
+            <a
+              href="tel:+910000000000"
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-800 transition hover:border-slate-400"
+            >
+              +91 00000 00000
             </a>
           </div>
         </div>
       </section>
 
-      <footer className="border-t border-slate-200 bg-white/80 py-10 text-center text-slate-600">
-        <div className="mb-5 flex justify-center space-x-6 text-sm font-medium">
-          <a href="#about" className="transition hover:text-slate-900">
-            About
-          </a>
-          <a href="#contact" className="transition hover:text-slate-900">
-            Contact
-          </a>
-          <a href="#features" className="transition hover:text-slate-900">
-            Privacy Policy
-          </a>
-        </div>
-        <p className="text-xs md:text-sm">
-          © {new Date().getFullYear()} FindMe AI Detection System. All rights
-          reserved.
-        </p>
+      <footer className="border-t border-slate-200 bg-white py-7 text-center text-sm text-slate-600">
+        <p>© {new Date().getFullYear()} FindMe AI. All rights reserved.</p>
       </footer>
     </div>
   );

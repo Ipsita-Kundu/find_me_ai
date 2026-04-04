@@ -4,6 +4,8 @@ motor
 pydantic-settings
 opencv-python
 numpy
+insightface
+onnxruntime
 python-multipart
 python-jose[cryptography]
 passlib[bcrypt]

@@ -6,7 +6,12 @@ from passlib.context import CryptContext
 from app.core.config import settings
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(
+    # Keep bcrypt in supported schemes for backward compatibility, but use
+    # pbkdf2_sha256 as primary to avoid bcrypt backend/runtime issues.
+    schemes=["pbkdf2_sha256", "bcrypt"],
+    deprecated="auto",
+)
 
 
 def hash_password(password: str) -> str:
