@@ -295,6 +295,8 @@ async def my_alerts(
     db: AsyncIOMotorDatabase = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
+    from bson import ObjectId
+    
     user_id = str(current_user["_id"])
     phone = current_user.get("phone_number")
 
@@ -350,27 +352,107 @@ async def my_alerts(
         key=lambda alert: alert.get("created_at") or datetime.min,
         reverse=True,
     )
-    return {"alerts": items}
+    
+    # Enrich alerts with full report details
+    enriched_alerts = []
+    for alert in items:
+        enriched_alert = dict(alert)
+        
+        # Fetch missing report if missing_id exists
+        if alert.get("missing_id"):
+            try:
+                missing_oid = ObjectId(alert["missing_id"])
+                missing_report = await db["missing_reports"].find_one({"_id": missing_oid})
+                if missing_report:
+                    enriched_alert["missing_report"] = {
+                        "id": str(missing_report["_id"]),
+                        "name": missing_report.get("name", "Unknown"),
+                        "age": missing_report.get("age"),
+                        "gender": missing_report.get("gender"),
+                        "location": missing_report.get("last_seen_location"),
+                        "image_path": missing_report.get("image_path"),
+                        "created_by": missing_report.get("created_by"),
+                    }
+            except Exception:
+                pass
+        
+        # Fetch found report if found_id exists
+        if alert.get("found_id"):
+            try:
+                found_oid = ObjectId(alert["found_id"])
+                found_report = await db["found_reports"].find_one({"_id": found_oid})
+                if found_report:
+                    enriched_alert["found_report"] = {
+                        "id": str(found_report["_id"]),
+                        "location": found_report.get("found_location"),
+                        "image_path": found_report.get("image_path"),
+                        "contact_info": found_report.get("contact_info"),
+                        "created_by": found_report.get("created_by"),
+                    }
+            except Exception:
+                pass
+        
+        enriched_alerts.append(enriched_alert)
+    
+    return {"alerts": enriched_alerts}
 
 
-@router.patch("/alerts/{alert_id}/read")
-async def mark_alert_read(
-    alert_id: str,
+@router.get("/alerts/all")
+async def get_all_alerts(
     db: AsyncIOMotorDatabase = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),  # any logged-in user
 ):
-    try:
-        oid = ObjectId(alert_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid alert ID")
+    """Return all alerts system-wide with enriched report details."""
+    items = []
+    cursor = db["alerts"].find(
+        {"type": {"$ne": "contact_shared"}}  # exclude system notifications
+    ).sort("created_at", -1).limit(200)
 
-    result = await db["alerts"].update_one(
-        {"_id": oid},
-        {"$set": {"read_at": datetime.utcnow()}},
-    )
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Alert not found")
-    return {"status": "ok"}
+    async for alert in cursor:
+        enriched = {
+            "_id": str(alert["_id"]),
+            "missing_id": alert.get("missing_id", ""),
+            "found_id": alert.get("found_id", ""),
+            "similarity": alert.get("similarity"),
+            "created_at": alert.get("created_at"),
+            "missing_report": None,
+            "found_report": None,
+        }
+
+        # Enrich with missing report
+        if alert.get("missing_id"):
+            try:
+                missing = await db["missing_reports"].find_one(
+                    {"_id": ObjectId(alert["missing_id"])}
+                )
+                if missing:
+                    enriched["missing_report"] = {
+                        "name": missing.get("name", "Unknown"),
+                        "image_path": missing.get("image_path"),
+                        "last_seen_location": missing.get("last_seen_location"),
+                        "age": missing.get("age"),
+                        "gender": missing.get("gender"),
+                    }
+            except Exception:
+                pass
+
+        # Enrich with found report
+        if alert.get("found_id"):
+            try:
+                found = await db["found_reports"].find_one(
+                    {"_id": ObjectId(alert["found_id"])}
+                )
+                if found:
+                    enriched["found_report"] = {
+                        "image_path": found.get("image_path"),
+                        "found_location": found.get("found_location"),
+                    }
+            except Exception:
+                pass
+
+        items.append(enriched)
+
+    return items  # raw array — matches what fetchAllAlerts() expects
 
 
 @router.patch("/alerts/read-all")
@@ -426,6 +508,26 @@ async def clear_all_alerts(
 
     result = await db["alerts"].delete_many({"$or": conditions})
     return {"status": "ok", "deleted": result.deleted_count}
+
+
+@router.patch("/alerts/{alert_id}/read")
+async def mark_alert_read(
+    alert_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        oid = ObjectId(alert_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid alert ID")
+
+    result = await db["alerts"].update_one(
+        {"_id": oid},
+        {"$set": {"read_at": datetime.utcnow()}},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {"status": "ok"}
 
 
 @router.get("/alerts/{alert_id}/contact")

@@ -1,490 +1,767 @@
 "use client";
-
+// Fixed ARIA attributes issue
+import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
-import AppNavbar from "@/components/AppNavbar";
-import ProtectedRoute from "@/components/ProtectedRoute";
-import LoadingSpinner from "@/components/ui/LoadingSpinner";
-import Toast from "@/components/ui/Toast";
 import { useAuth } from "@/context/AuthContext";
-import { fetchMatchesForReport, revealContact } from "@/services/api";
-import type { MatchDetail, ContactRevealResponse } from "@/types";
+import {
+  fetchMyAlerts,
+  markAlertRead,
+  markAllAlertsRead,
+  clearAllAlerts,
+} from "@/services/api";
+import Button from "@/components/ui/Button";
 
-export default function MatchesPage() {
-  const params = useParams<{ reportId: string }>();
-  const reportId = params.reportId;
-  const { token } = useAuth();
+const [showConfirm, setShowConfirm] = useState(false);
+const [isRevealed, setIsRevealed] = useState(false);
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [matches, setMatches] = useState<MatchDetail[]>([]);
-  const [missingName, setMissingName] = useState("Unknown");
-  const [missingImagePath, setMissingImagePath] = useState<string | null>(null);
+const navLinks = [
+  { label: "Home", href: "/#home" },
+  { label: "About", href: "/#about" },
+  { label: "Contact", href: "/#contact" },
+];
 
-  // Contact reveal state per alert id
-  const [revealConfirm, setRevealConfirm] = useState<string | null>(null);
-  const [revealLoading, setRevealLoading] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState<
-    Record<string, ContactRevealResponse>
-  >({});
+const serviceLinks = [
+  { label: "Report Missing", href: "/report-missing" },
+  { label: "Report Found", href: "/report-found" },
+];
 
-  const API = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
-  const imgUrl = (path?: string | null) =>
-    !path
-      ? "/placeholder.png"
-      : path.startsWith("http")
-        ? path
-        : `${API}/${path.replace(/\\/g, "/")}`;
+const navTabBaseClass =
+  "rounded-lg px-3 py-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 dark:focus-visible:ring-cyan-700/70";
 
-  const loadMatches = useCallback(
-    async (mode: "initial" | "silent" = "initial") => {
-      if (!token || !reportId) return;
-      if (mode === "initial") setLoading(true);
-      setError("");
-      try {
-        const data = await fetchMatchesForReport(reportId, token);
-        setMissingName(data.missingName);
-        setMissingImagePath(data.missingImagePath);
-        // Only show matches ≥ 65% confidence
-        const filtered = data.matches.filter((m) => m.similarity >= 0.65);
-        filtered.sort((a, b) => {
-          const diff = b.similarity - a.similarity;
-          return diff !== 0
-            ? diff
-            : new Date(b.created_at).getTime() -
-                new Date(a.created_at).getTime();
-        });
-        setMatches(filtered);
-      } catch (err) {
-        if (mode === "initial")
-          setError(
-            err instanceof Error ? err.message : "Failed to load matches.",
-          );
-      } finally {
-        if (mode === "initial") setLoading(false);
-      }
-    },
-    [token, reportId],
-  );
+const navTabActiveClass =
+  "text-cyan-700 ring-1 ring-cyan-200 dark:text-cyan-300 dark:ring-cyan-900/60";
 
-  // Initial load
-  useEffect(() => {
-    void loadMatches("initial");
-  }, [loadMatches]);
+const navTabInactiveClass =
+  "text-slate-600 hover:text-cyan-700 hover:ring-1 hover:ring-cyan-200 dark:text-slate-300 dark:hover:text-cyan-300 dark:hover:ring-cyan-900/60";
 
-  // 10s polling
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => {
-    pollRef.current = setInterval(() => void loadMatches("silent"), 10_000);
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [loadMatches]);
+export default function AppNavbar() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { isAuthenticated, user, token, logout, getDefaultDashboardPath } =
+    useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [servicesOpen, setServicesOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState<
+    Array<{
+      id: string;
+      similarity: number;
+      missingId: string;
+      createdAt: string;
+      isNew: boolean;
+      readAt: string | null;
+    }>
+  >([]);
+  const [currentHash, setCurrentHash] = useState("");
+  const [reportSearch, setReportSearch] = useState("");
+  const [reportTypeFilter, setReportTypeFilter] = useState<
+    "all" | "missing" | "found"
+  >("all");
+  const servicesMenuRef = useRef<HTMLDivElement | null>(null);
+  const notifMenuRef = useRef<HTMLDivElement | null>(null);
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isServicesActive =
+    servicesOpen ||
+    pathname === "/report-missing" ||
+    pathname === "/report-found";
+  const dashboardHref = isAuthenticated
+    ? getDefaultDashboardPath()
+    : "/dashboard";
+  const isDashboardActive = pathname === "/dashboard" || pathname === "/admin";
 
-  const handleReveal = async (alertId: string) => {
-    if (revealConfirm !== alertId) {
-      setRevealConfirm(alertId);
+  const isHomeActive =
+    pathname === "/" && (currentHash === "" || currentHash === "#home");
+  const isAboutActive = pathname === "/" && currentHash === "#about";
+  const isContactActive = pathname === "/" && currentHash === "#contact";
+
+  const clearHoverTimers = () => {
+    if (openTimerRef.current) {
+      clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+
+  const scheduleOpenServices = () => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    if (servicesOpen) {
       return;
     }
-    if (!token) return;
-    setRevealLoading(alertId);
+    openTimerRef.current = setTimeout(() => {
+      setServicesOpen(true);
+      openTimerRef.current = null;
+    }, 120);
+  };
+
+  const scheduleCloseServices = () => {
+    if (openTimerRef.current) {
+      clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+    closeTimerRef.current = setTimeout(() => {
+      setServicesOpen(false);
+      closeTimerRef.current = null;
+    }, 260);
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const syncHash = () => setCurrentHash(window.location.hash);
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+    return () => window.removeEventListener("hashchange", syncHash);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q") ?? "";
+    const type = params.get("type");
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setReportSearch(q);
+    setReportTypeFilter(type === "missing" || type === "found" ? type : "all");
+  }, [pathname]);
+
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent) => {
+      if (
+        servicesMenuRef.current &&
+        !servicesMenuRef.current.contains(event.target as Node)
+      ) {
+        setServicesOpen(false);
+      }
+      if (
+        notifMenuRef.current &&
+        !notifMenuRef.current.contains(event.target as Node)
+      ) {
+        setNotifOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearHoverTimers();
+    };
+  }, []);
+
+  // Fetch notifications for bell icon
+  const loadNotifications = useCallback(async () => {
+    if (!token || !isAuthenticated) return;
     try {
-      const contact = await revealContact(alertId, token);
-      setRevealed((prev) => ({ ...prev, [alertId]: contact }));
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to reveal contact.",
-      );
-    } finally {
-      setRevealLoading(null);
-      setRevealConfirm(null);
+      const alerts = await fetchMyAlerts(token);
+      const mapped = alerts
+        .sort(
+          (a, b) =>
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+        )
+        .slice(0, 20)
+        .map((alert) => ({
+          id: alert._id,
+          similarity: Math.round((alert.similarity ?? 0) * 100),
+          missingId: alert.missing_id ?? "",
+          createdAt: alert.created_at,
+          isNew: !alert.read_at,
+          readAt: alert.read_at ?? null,
+        }));
+      setNotifications(mapped);
+    } catch {
+      // Silent fail for notifications
+    }
+  }, [token, isAuthenticated]);
+
+  // Initial load + poll every 10s for real-time notification updates
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadNotifications();
+    const interval = setInterval(() => void loadNotifications(), 10_000);
+    return () => clearInterval(interval);
+  }, [loadNotifications]);
+
+  const handleMarkRead = async (alertId: string) => {
+    if (!token) return;
+    setNotifications((prev) =>
+      prev.map((n) =>
+        n.id === alertId
+          ? { ...n, isNew: false, readAt: new Date().toISOString() }
+          : n,
+      ),
+    );
+    try {
+      await markAlertRead(alertId, token);
+    } catch {
+      // ignore
     }
   };
 
-  /* ── Confidence ring SVG helper ── */
-  const ConfidenceRing = ({ pct }: { pct: number }) => {
-    const r = 36;
-    const circ = 2 * Math.PI * r;
-    const offset = circ - (pct / 100) * circ;
-    const color =
-      pct >= 85
-        ? "stroke-emerald-500"
-        : pct >= 75
-          ? "stroke-cyan-500"
-          : "stroke-amber-500";
-    return (
-      <svg width="96" height="96" className="shrink-0">
-        <circle
-          cx="48"
-          cy="48"
-          r={r}
-          fill="none"
-          strokeWidth="6"
-          className="stroke-slate-200"
-        />
-        <circle
-          cx="48"
-          cy="48"
-          r={r}
-          fill="none"
-          strokeWidth="6"
-          strokeLinecap="round"
-          strokeDasharray={circ}
-          strokeDashoffset={offset}
-          className={`${color} transition-all duration-700`}
-          transform="rotate(-90 48 48)"
-        />
-        <text
-          x="48"
-          y="44"
-          textAnchor="middle"
-          className="fill-slate-800 text-lg font-extrabold"
-          dominantBaseline="central"
-          style={{ fontSize: "18px", fontWeight: 800 }}
-        >
-          {pct}%
-        </text>
-        <text
-          x="48"
-          y="62"
-          textAnchor="middle"
-          className="fill-slate-400"
-          style={{ fontSize: "10px" }}
-        >
-          match
-        </text>
-      </svg>
+  const handleMarkAllRead = async () => {
+    if (!token) return;
+    setNotifications((prev) =>
+      prev.map((n) => ({
+        ...n,
+        isNew: false,
+        readAt: new Date().toISOString(),
+      })),
     );
+    try {
+      await markAllAlertsRead(token);
+    } catch {
+      // ignore
+    }
   };
 
+  const handleClearAll = async () => {
+    if (!token) return;
+    setNotifications([]);
+    setNotifOpen(false);
+    try {
+      await clearAllAlerts(token);
+    } catch {
+      // ignore
+    }
+  };
+
+  const unreadCount = notifications.filter((n) => n.isNew).length;
+
+  const handleNavTabClick = (href: string, label: string) => {
+    void label;
+    setServicesOpen(false);
+    setMenuOpen(false);
+    router.push(href);
+  };
+
+  const handleReportSearchSubmit = (
+    event: React.FormEvent<HTMLFormElement>,
+  ) => {
+    event.preventDefault();
+
+    const params = new URLSearchParams();
+    const trimmedQuery = reportSearch.trim();
+
+    if (trimmedQuery) {
+      params.set("q", trimmedQuery);
+    }
+    if (reportTypeFilter !== "all") {
+      params.set("type", reportTypeFilter);
+    }
+
+    const queryString = params.toString();
+    router.push(queryString ? `/dashboard?${queryString}` : "/dashboard");
+    setMenuOpen(false);
+  };
+
+  const visibleNavLinks = navLinks.filter((link) => {
+    if (!("role" in link) || !link.role) {
+      return true;
+    }
+    return user?.role === link.role;
+  });
+
+  const homeLink = visibleNavLinks.find((link) => link.label === "Home");
+  const tailNavLinks = visibleNavLinks.filter((link) => link.label !== "Home");
+
+  const adminCameraLinks = user?.role === "authority" ? [
+    { label: "Surveillance", href: "/admin/surveillance" },
+    { label: "CCTV", href: "/admin/cctv" },
+  ] : [];
+
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_right,_#dff4ff_0%,_#f7fbff_45%,_#fff7ef_100%)] text-slate-900">
-      <AppNavbar />
-      <ProtectedRoute requiredRole="user">
-        <main className="mx-auto w-full max-w-6xl space-y-8 px-4 py-10 md:px-8">
-          {/* ── Header ── */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <Link
-                href="/dashboard"
-                className="group flex items-center gap-1 text-sm font-medium text-cyan-600 hover:text-cyan-700"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 transition group-hover:-translate-x-0.5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M15 19l-7-7 7-7"
-                  />
-                </svg>
-                Dashboard
-              </Link>
-              <h1 className="mt-1 text-2xl font-extrabold tracking-tight md:text-3xl">
-                Match Results
-              </h1>
-              <p className="mt-0.5 text-sm text-slate-500">
-                for&nbsp;
-                <span className="font-semibold text-slate-700">
-                  {missingName}
-                </span>
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void loadMatches("initial")}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 hover:shadow"
+    <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
+      <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 md:px-8">
+        <Link
+          href="/"
+          className="flex items-center gap-2 text-lg font-extrabold tracking-tight text-slate-900 md:text-xl dark:text-slate-100"
+        >
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl bg-cyan-100 text-cyan-700 dark:bg-cyan-900 dark:text-cyan-200">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-5 w-5"
+              aria-hidden="true"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-3.5 w-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
-              Refresh
+              <path d="M12 2l9 7-3 12-6-3-6 3-3-12 9-7z" />
+            </svg>
+          </span>
+          FindMe AI
+        </Link>
+
+        <nav className="hidden items-center gap-2 md:flex">
+          {homeLink ? (
+            <button
+              key={homeLink.href}
+              onClick={() => {
+                handleNavTabClick(homeLink.href, homeLink.label);
+              }}
+              type="button"
+              className={`${navTabBaseClass} ${isHomeActive ? navTabActiveClass : navTabInactiveClass}`}
+            >
+              {homeLink.label}
             </button>
+          ) : null}
+
+          <button
+            onClick={() => {
+              handleNavTabClick(dashboardHref, "Dashboard");
+            }}
+            type="button"
+            className={`${navTabBaseClass} ${isDashboardActive ? navTabActiveClass : navTabInactiveClass}`}
+          >
+            Dashboard
+          </button>
+
+          <div
+            className="relative"
+            ref={servicesMenuRef}
+            onMouseEnter={scheduleOpenServices}
+            onMouseLeave={scheduleCloseServices}
+          >
+            <button
+              onClick={() => {
+                clearHoverTimers();
+                setServicesOpen((prev) => !prev);
+              }}
+              className={`appearance-none border-0 bg-transparent cursor-pointer ${navTabBaseClass} ${isServicesActive ? navTabActiveClass : navTabInactiveClass}`}
+              aria-expanded={servicesOpen ? "true" : "false"}
+              onFocus={scheduleOpenServices}
+              type="button"
+            >
+              Services
+            </button>
+            <div
+              className={`${servicesOpen ? "visible opacity-100" : "invisible opacity-0"} absolute left-0 top-full z-50 mt-1 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-lg transition dark:border-slate-700 dark:bg-slate-900`}
+              onMouseEnter={scheduleOpenServices}
+              onMouseLeave={scheduleCloseServices}
+            >
+              {serviceLinks.map((item) => (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => {
+                    setServicesOpen(false);
+                  }}
+                  className="block rounded-lg px-3 py-2 text-sm text-slate-700 transition hover:text-cyan-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:text-cyan-300 dark:hover:bg-slate-800"
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
           </div>
 
-          {error && <Toast message={error} tone="error" />}
+          {tailNavLinks.map((link) => {
+            const isActive =
+              link.label === "About"
+                ? isAboutActive
+                : link.label === "Contact"
+                  ? isContactActive
+                  : false;
+            return (
+              <button
+                key={link.href}
+                onClick={() => {
+                  handleNavTabClick(link.href, link.label);
+                }}
+                type="button"
+                className={`${navTabBaseClass} ${isActive ? navTabActiveClass : navTabInactiveClass}`}
+              >
+                {link.label}
+              </button>
+            );
+          })}
+          {adminCameraLinks.map((link) => {
+            const isActive = pathname === link.href;
+            return (
+              <button
+                key={link.href}
+                onClick={() => handleNavTabClick(link.href, link.label)}
+                type="button"
+                className={`${navTabBaseClass} ${isActive ? navTabActiveClass : navTabInactiveClass}`}
+              >
+                <span className="mr-2 inline-flex h-4 w-4 items-center justify-center rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-3.5 w-3.5"
+                    aria-hidden="true"
+                  >
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                  </svg>
+                </span>
+                {link.label}
+              </button>
+            );
+          })}
+        </nav>
 
-          {loading ? (
-            <div className="flex min-h-[40vh] items-center justify-center">
-              <LoadingSpinner label="Searching for matches..." />
-            </div>
-          ) : matches.length === 0 ? (
-            /* ── Empty state ── */
-            <div className="rounded-3xl border border-dashed border-slate-300 bg-white/70 p-12 text-center backdrop-blur">
-              <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-cyan-100 to-sky-50 shadow-inner">
+        <form
+          onSubmit={handleReportSearchSubmit}
+          className="hidden items-center gap-2 lg:flex"
+          role="search"
+        >
+          <input
+            type="search"
+            value={reportSearch}
+            onChange={(event) => setReportSearch(event.target.value)}
+            placeholder="Search reports..."
+            className="w-56 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-cyan-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
+          />
+          <select
+            value={reportTypeFilter}
+            onChange={(event) =>
+              setReportTypeFilter(
+                event.target.value as "all" | "missing" | "found",
+              )
+            }
+            className="rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-cyan-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            aria-label="Filter report type"
+          >
+            <option value="all">All</option>
+            <option value="missing">Missing</option>
+            <option value="found">Found</option>
+          </select>
+          <button
+            type="submit"
+            className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-cyan-500 dark:text-slate-950 dark:hover:bg-cyan-400"
+          >
+            Search
+          </button>
+        </form>
+
+        <div className="flex items-center gap-2">
+          {/* Notification Bell */}
+          {isAuthenticated && (
+            <div className="relative" ref={notifMenuRef}>
+              <button
+                type="button"
+                onClick={() => setNotifOpen((prev) => !prev)}
+                className="relative rounded-lg p-2 text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                aria-label="Notifications"
+              >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="1.5"
+                  strokeWidth="2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  className="h-10 w-10 text-cyan-500"
+                  className="h-5 w-5"
                 >
                   <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
                   <path d="M13.73 21a2 2 0 0 1-3.46 0" />
                 </svg>
-              </div>
-              <p className="text-xl font-bold text-slate-700">
-                No matches found yet
-              </p>
-              <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-500">
-                Our AI is actively scanning new reports. You&apos;ll receive a
-                notification the moment a potential match is found.
-              </p>
-              <div className="mt-8 flex items-center justify-center gap-3">
-                <Link
-                  href="/dashboard"
-                  className="rounded-full bg-cyan-600 px-6 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-cyan-700 hover:shadow-md"
-                >
-                  Return to Dashboard
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => void loadMatches("initial")}
-                  className="rounded-full border border-slate-300 bg-white px-6 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                >
-                  Check Again
-                </button>
-              </div>
+                {unreadCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {notifOpen && (
+                <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                  <div className="border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                        Notifications
+                      </p>
+                      <div className="flex items-center gap-2">
+                        {unreadCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleMarkAllRead}
+                            className="text-[11px] font-medium text-cyan-600 hover:text-cyan-700 dark:text-cyan-400 dark:hover:text-cyan-300"
+                          >
+                            Mark all read
+                          </button>
+                        )}
+                        {notifications.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleClearAll}
+                            className="text-[11px] font-medium text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                          >
+                            Clear all
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {unreadCount > 0 && (
+                      <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                        {unreadCount} unread
+                      </span>
+                    )}
+                  </div>
+                  <div className="max-h-80 overflow-y-auto">
+                    {notifications.length > 0 ? (
+                      notifications.map((notif) => (
+                        <button
+                          key={notif.id}
+                          type="button"
+                          onClick={() => {
+                            if (notif.isNew) {
+                              void handleMarkRead(notif.id);
+                            }
+                            setNotifOpen(false);
+                            router.push(`/matches/${notif.missingId}`);
+                          }}
+                          className={`flex w-full items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/70 ${
+                            notif.isNew
+                              ? "bg-cyan-50/60 dark:bg-cyan-900/10"
+                              : ""
+                          }`}
+                        >
+                          {notif.isNew && (
+                            <span className="flex h-2 w-2 shrink-0 rounded-full bg-cyan-500" />
+                          )}
+                          <div className={notif.isNew ? "" : "ml-5"}>
+                            <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+                              Match found —{" "}
+                              <span
+                                className={`${notif.similarity >= 80 ? "text-emerald-600" : notif.similarity >= 70 ? "text-cyan-600" : "text-amber-600"}`}
+                              >
+                                {notif.similarity}%
+                              </span>
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              {new Date(notif.createdAt).toLocaleString()}
+                            </p>
+                          </div>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-4 py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+                        No notifications yet
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
+          )}
+
+          {isAuthenticated ? (
+            <>
+              <span className="hidden text-sm text-slate-600 sm:inline dark:text-slate-300">
+                Hi, {user?.name}
+              </span>
+              <Button variant="ghost" onClick={logout}>
+                Logout
+              </Button>
+            </>
           ) : (
             <>
-              {/* ── Summary banner ── */}
-              <div className="flex items-center gap-3 rounded-2xl border border-cyan-200 bg-gradient-to-r from-cyan-50 to-sky-50 px-5 py-3 shadow-sm">
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-cyan-600 text-white shadow">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2.5}
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      d="M5 13l4 4L19 7"
-                    />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-cyan-900">
-                    {matches.length} potential match
-                    {matches.length !== 1 ? "es" : ""} found
-                  </p>
-                  <p className="text-xs text-cyan-700/80">
-                    Sorted by confidence &middot; auto-refreshes every 10s
-                  </p>
-                </div>
-              </div>
-
-              {/* ── Match cards ── */}
-              <div className="space-y-6">
-                {matches.map((m, idx) => {
-                  const pct = Math.round(m.similarity * 100);
-                  const contact = revealed[m._id];
-                  const isNew = idx === 0;
-                  return (
-                    <article
-                      key={m._id}
-                      className="group relative overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-lg"
-                    >
-                      {/* Top accent bar */}
-                      <div
-                        className={`h-1 w-full ${pct >= 85 ? "bg-emerald-500" : pct >= 75 ? "bg-cyan-500" : "bg-amber-400"}`}
-                      />
-
-                      {isNew && (
-                        <span className="absolute right-4 top-4 z-10 rounded-full bg-cyan-600 px-3 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white shadow">
-                          Latest
-                        </span>
-                      )}
-
-                      <div className="p-5 md:p-6">
-                        {/* ── Side-by-side photos + confidence ring ── */}
-                        <div className="flex flex-col items-center gap-5 sm:flex-row">
-                          {/* Missing person photo */}
-                          <div className="flex flex-col items-center gap-1.5">
-                            <div className="relative h-36 w-36 overflow-hidden rounded-2xl border-2 border-slate-200 shadow-sm md:h-44 md:w-44">
-                              <div
-                                className="h-full w-full bg-cover bg-center"
-                                style={{
-                                  backgroundImage: `url(${imgUrl(missingImagePath)})`,
-                                }}
-                              />
-                            </div>
-                            <span className="rounded-full bg-slate-100 px-3 py-0.5 text-[11px] font-semibold text-slate-600">
-                              Missing
-                            </span>
-                          </div>
-
-                          {/* Confidence ring in the middle */}
-                          <div className="flex flex-col items-center gap-1">
-                            <ConfidenceRing pct={pct} />
-                            <span
-                              className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-                                pct >= 85
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : pct >= 75
-                                    ? "bg-cyan-100 text-cyan-700"
-                                    : "bg-amber-100 text-amber-700"
-                              }`}
-                            >
-                              {pct >= 85
-                                ? "High"
-                                : pct >= 75
-                                  ? "Medium"
-                                  : "Low"}{" "}
-                              confidence
-                            </span>
-                          </div>
-
-                          {/* Found person photo */}
-                          <div className="flex flex-col items-center gap-1.5">
-                            <div className="relative h-36 w-36 overflow-hidden rounded-2xl border-2 border-cyan-200 shadow-sm md:h-44 md:w-44">
-                              <div
-                                className="h-full w-full bg-cover bg-center"
-                                style={{
-                                  backgroundImage: `url(${imgUrl(m.found_image_path)})`,
-                                }}
-                              />
-                            </div>
-                            <span className="rounded-full bg-cyan-50 px-3 py-0.5 text-[11px] font-semibold text-cyan-700">
-                              Found
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* ── Details row ── */}
-                        <div className="mt-5 flex flex-wrap items-start justify-between gap-4 border-t border-slate-100 pt-4">
-                          <div className="space-y-1.5 text-sm">
-                            <p className="text-slate-600">
-                              <span className="font-semibold text-slate-800">
-                                Reported by:
-                              </span>{" "}
-                              {m.finder_name || "Anonymous"}
-                            </p>
-                            {m.found_location && (
-                              <p className="text-slate-500">
-                                <span className="font-semibold text-slate-700">
-                                  Location:
-                                </span>{" "}
-                                {m.found_location}
-                              </p>
-                            )}
-                            <p className="text-xs text-slate-400">
-                              Matched on{" "}
-                              {new Date(m.created_at).toLocaleDateString(
-                                undefined,
-                                {
-                                  year: "numeric",
-                                  month: "short",
-                                  day: "numeric",
-                                },
-                              )}
-                            </p>
-                          </div>
-
-                          {/* ── Contact section ── */}
-                          <div className="shrink-0">
-                            {contact ? (
-                              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 px-5 py-3 text-center shadow-sm">
-                                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">
-                                  Contact Info
-                                </p>
-                                <p className="mt-1 text-sm font-bold text-emerald-800">
-                                  {contact.finder_name}
-                                </p>
-                                {contact.finder_phone ? (
-                                  <a
-                                    href={`tel:${contact.finder_phone}`}
-                                    className="mt-1 inline-flex items-center gap-1 text-sm font-bold text-cyan-700 underline decoration-cyan-300 underline-offset-2 hover:text-cyan-800"
-                                  >
-                                    <svg
-                                      xmlns="http://www.w3.org/2000/svg"
-                                      className="h-3.5 w-3.5"
-                                      fill="none"
-                                      viewBox="0 0 24 24"
-                                      stroke="currentColor"
-                                      strokeWidth={2}
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
-                                      />
-                                    </svg>
-                                    {contact.finder_phone}
-                                  </a>
-                                ) : (
-                                  <p className="mt-1 text-xs text-slate-500">
-                                    No phone available
-                                  </p>
-                                )}
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => void handleReveal(m._id)}
-                                disabled={revealLoading === m._id}
-                                className={`inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-sm font-semibold shadow-sm transition ${
-                                  revealConfirm === m._id
-                                    ? "bg-amber-500 text-white hover:bg-amber-600"
-                                    : "bg-cyan-600 text-white hover:bg-cyan-700 hover:shadow"
-                                } disabled:opacity-50`}
-                              >
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  className="h-4 w-4"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                  strokeWidth={2}
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                                  />
-                                </svg>
-                                {revealLoading === m._id
-                                  ? "Revealing..."
-                                  : revealConfirm === m._id
-                                    ? "Confirm — share your contact too"
-                                    : "Reveal Contact"}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
+              <Link href="/login">
+                <Button variant="ghost">Login</Button>
+              </Link>
+              <Link href="/signup">
+                <Button variant="secondary">Sign Up</Button>
+              </Link>
             </>
           )}
-        </main>
-      </ProtectedRoute>
-    </div>
+          <button
+            className="rounded-lg border border-slate-300 px-2 py-1 text-sm text-slate-700 md:hidden dark:border-slate-700 dark:text-slate-200"
+            onClick={() => setMenuOpen((prev) => !prev)}
+            aria-label="Toggle menu"
+          >
+            Menu
+          </button>
+        </div>
+      </div>
+
+      {menuOpen ? (
+        <div className="border-t border-slate-200 px-4 py-3 md:hidden dark:border-slate-800">
+          <div className="flex flex-col gap-2">
+            {homeLink ? (
+              <button
+                onClick={() => {
+                  handleNavTabClick(homeLink.href, homeLink.label);
+                }}
+                type="button"
+                className={`${navTabBaseClass} ${isHomeActive ? navTabActiveClass : navTabInactiveClass}`}
+              >
+                {homeLink.label}
+              </button>
+            ) : null}
+            <button
+              onClick={() => {
+                handleNavTabClick(dashboardHref, "Dashboard");
+              }}
+              type="button"
+              className={`${navTabBaseClass} ${isDashboardActive ? navTabActiveClass : navTabInactiveClass}`}
+            >
+              Dashboard
+            </button>
+            <p className="px-3 pt-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+              Services
+            </p>
+            {serviceLinks.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMenuOpen(false)}
+                className="rounded-lg px-3 py-2 text-sm text-slate-700 hover:text-cyan-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:text-cyan-300 dark:hover:bg-slate-800"
+              >
+                {item.label}
+              </Link>
+            ))}
+            {adminCameraLinks.map((link) => (
+              <button
+                key={link.href}
+                onClick={() => {
+                  setMenuOpen(false);
+                  handleNavTabClick(link.href, link.label);
+                }}
+                type="button"
+                className={`${navTabBaseClass} ${pathname === link.href ? navTabActiveClass : navTabInactiveClass}`}
+              >
+                <span className="mr-2 inline-flex h-4 w-4 items-center justify-center rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-3.5 w-3.5"
+                    aria-hidden="true"
+                  >
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                  </svg>
+                </span>
+                {link.label}
+              </button>
+            ))}
+            {tailNavLinks.map((link) => (
+              <button
+                key={link.href}
+                onClick={() => {
+                  handleNavTabClick(link.href, link.label);
+                }}
+                type="button"
+                className={`${navTabBaseClass} ${(link.label === "About" ? isAboutActive : link.label === "Contact" ? isContactActive : false) ? navTabActiveClass : navTabInactiveClass}`}
+              >
+                {link.label}
+              </button>
+            ))}
+
+            <form
+              onSubmit={handleReportSearchSubmit}
+              className="mt-2 space-y-2"
+            >
+              <input
+                type="search"
+                value={reportSearch}
+                onChange={(event) => setReportSearch(event.target.value)}
+                placeholder="Search reports..."
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-cyan-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
+              />
+              <div className="flex gap-2">
+                <select
+                  value={reportTypeFilter}
+                  onChange={(event) =>
+                    setReportTypeFilter(
+                      event.target.value as "all" | "missing" | "found",
+                    )
+                  }
+                  className="flex-1 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 outline-none transition focus:border-cyan-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                  aria-label="Filter report type"
+                >
+                  <option value="all">All</option>
+                  <option value="missing">Missing</option>
+                  <option value="found">Found</option>
+                </select>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-cyan-500 dark:text-slate-950 dark:hover:bg-cyan-400"
+                >
+                  Search
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+    </header>
   );
 }
+
+
+
+{/* Reveal Contact Section */ }
+<div className="mt-6 p-4 border-t border-slate-100 dark:border-slate-800">
+  {!isRevealed ? (
+    <div className="text-center">
+      <p className="text-sm text-slate-500 mb-3">Contact information is hidden for privacy.</p>
+      <button
+        onClick={() => setShowConfirm(true)}
+        className="w-full py-3 px-4 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold rounded-xl transition-all shadow-lg shadow-cyan-200 dark:shadow-none"
+      >
+        Reveal Contact Information
+      </button>
+    </div>
+  ) : (
+    <div className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-dashed border-cyan-200 dark:border-cyan-800">
+      <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-600 mb-2">Finder's Contact Details</h4>
+      <p className="text-slate-900 dark:text-white font-medium">Name: {matchData?.finder_name || "N/A"}</p>
+      <p className="text-slate-600 dark:text-slate-400">Phone: {matchData?.finder_phone || "N/A"}</p>
+      <p className="text-slate-600 dark:text-slate-400">Email: {matchData?.finder_email || "N/A"}</p>
+    </div>
+  )}
+
+  {/* Confirmation Modal */}
+  {showConfirm && (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-slate-200 dark:border-slate-800">
+        <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Reveal Contact?</h3>
+        <p className="text-slate-600 dark:text-slate-400 mb-6">
+          This will show the finder's details. The system will log that you have accessed this information.
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowConfirm(false)}
+            className="flex-1 py-2 px-4 text-slate-600 dark:text-slate-400 font-medium hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              setIsRevealed(true);
+              setShowConfirm(false);
+            }}
+            className="flex-1 py-2 px-4 bg-cyan-600 text-white font-medium rounded-lg hover:bg-cyan-700 transition"
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
+    </div>
+  )}
+</div>

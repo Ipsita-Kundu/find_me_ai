@@ -2,11 +2,15 @@ import type {
   BackendAlert,
   BackendFoundReport,
   BackendMissingReport,
+  CameraFeed,
   ContactRevealResponse,
   CreateFoundPayload,
   CreateMissingPayload,
   CreateMissingResponse,
+  LiveCameraScanResponse,
+  LiveCameraMatch,
   MatchDetail,
+  SurveillanceAlert,
 } from "@/types";
 import { alertsMock, foundPersonsMock, missingPersonsMock } from "@/mock-data";
 
@@ -330,6 +334,24 @@ export async function fetchMyMissingReports(
   return parseResponse<BackendMissingReport[]>(response);
 }
 
+export async function fetchAllMissingReports(
+  token: string,
+): Promise<BackendMissingReport[]> {
+  if (USE_MOCK_API) {
+    await sleep(300);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return toBackendMissingReport();
+  }
+
+  const response = await fetch(`${API_BASE_URL}/missing/all`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseResponse<BackendMissingReport[]>(response);
+}
+
 export async function fetchFoundReports(
   token: string,
 ): Promise<BackendFoundReport[]> {
@@ -351,6 +373,121 @@ export async function fetchFoundReports(
   return payload.found_reports;
 }
 
+export async function scanLiveCamera(
+  image: Blob,
+  token: string,
+  cameraName?: string,
+): Promise<LiveCameraScanResponse> {
+  if (USE_MOCK_API) {
+    await sleep(400);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return { matches: [] };
+  }
+
+  const formData = new FormData();
+  formData.append("image", image);
+  if (cameraName) {
+    formData.append("camera_name", cameraName);
+  }
+
+  const requestOptions: RequestInit = {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  };
+
+  const response = await fetch(`${API_BASE_URL}/admin/webcam-scan`, requestOptions);
+  if (response.status === 404) {
+    const fallbackResponse = await fetch(`${API_BASE_URL}/webcam-scan`, requestOptions);
+    if (fallbackResponse.ok) {
+      return parseResponse<LiveCameraScanResponse>(fallbackResponse);
+    }
+    if (fallbackResponse.status !== 404) {
+      return parseResponse<LiveCameraScanResponse>(fallbackResponse);
+    }
+
+    const fallbackBody = await fallbackResponse.json().catch(() => null);
+    const detail = fallbackBody?.detail ?? "Live scan endpoint not found.";
+    throw new Error(detail);
+  }
+
+  return parseResponse<LiveCameraScanResponse>(response);
+}
+
+export async function listCameras(token: string): Promise<CameraFeed[]> {
+  if (USE_MOCK_API) {
+    await sleep(200);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return [
+      {
+        id: "CAM-01",
+        name: "Front Entrance",
+        location: "Main Gate",
+        status: "online",
+        stream_url: "/camera/CAM-01/stream",
+        last_updated: new Date().toISOString(),
+      },
+      {
+        id: "CAM-02",
+        name: "Parking Lot",
+        location: "East Wing",
+        status: "online",
+        stream_url: "/camera/CAM-02/stream",
+        last_updated: new Date().toISOString(),
+      },
+      {
+        id: "CAM-03",
+        name: "Corridor",
+        location: "Building B",
+        status: "offline",
+        stream_url: undefined,
+        last_updated: new Date().toISOString(),
+      },
+    ];
+  }
+
+  const response = await fetch(`${API_BASE_URL}/admin/cameras`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const payload = await parseResponse<{ cameras: CameraFeed[] }>(response);
+  return payload.cameras;
+}
+
+export async function getSurveillanceLiveAlerts(
+  token: string,
+  cameraId?: string,
+  limit: number = 50,
+): Promise<SurveillanceAlert[]> {
+  if (USE_MOCK_API) {
+    await sleep(250);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return [];
+  }
+
+  const params = new URLSearchParams();
+  if (cameraId) {
+    params.append("camera_id", cameraId);
+  }
+  params.append("limit", String(limit));
+
+  const response = await fetch(
+    `${API_BASE_URL}/admin/surveillance-live?${params.toString()}`,
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  const payload = await parseResponse<{ alerts: SurveillanceAlert[] }>(response);
+  return payload.alerts;
+}
+
 export async function fetchMyFoundReports(
   token: string,
 ): Promise<BackendFoundReport[]> {
@@ -363,6 +500,24 @@ export async function fetchMyFoundReports(
   }
 
   const response = await fetch(`${API_BASE_URL}/found/mine`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseResponse<BackendFoundReport[]>(response);
+}
+
+export async function fetchAllFoundReports(
+  token: string,
+): Promise<BackendFoundReport[]> {
+  if (USE_MOCK_API) {
+    await sleep(300);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return toBackendFoundReport();
+  }
+
+  const response = await fetch(`${API_BASE_URL}/found/all`, {
     method: "GET",
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -531,4 +686,56 @@ export async function revealContact(
     },
   );
   return parseResponse<ContactRevealResponse>(response);
+}
+
+
+// Add this new function to your existing api.ts file
+// Place it right after fetchMyFoundReports()
+
+/**
+ * NEW — fixes cross-account match visibility.
+ *
+ * If the logged-in user uploaded a FOUND report and it matched someone else's
+ * MISSING report, this returns those missing reports (from any account) along
+ * with the best similarity score so they appear on the dashboard.
+ */
+export async function fetchMissingReportsMatchedToMyFound(
+  token: string,
+): Promise<(BackendMissingReport & { best_similarity: number })[]> {
+  if (USE_MOCK_API) {
+    await sleep(220);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return [];
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}/found/matched-missing-reports`,
+    {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+    },
+  );
+  return parseResponse<(BackendMissingReport & { best_similarity: number })[]>(
+    response,
+  );
+}
+
+export async function fetchAllAlerts(token: string): Promise<BackendAlert[]> {
+  if (USE_MOCK_API) {
+    await sleep(250);
+    if (!decodeMockToken(token)) {
+      throw new Error("You are not authenticated. Please login again.");
+    }
+    return toBackendAlerts();
+  }
+
+  const response = await fetch(`${API_BASE_URL}/auth/alerts/all`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  const payload = await parseResponse<BackendAlert[] | { alerts: BackendAlert[] }>(response);
+  return Array.isArray(payload) ? payload : (payload.alerts ?? []);
 }

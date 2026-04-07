@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import AppNavbar from "@/components/AppNavbar";
@@ -13,6 +14,8 @@ import {
   fetchMissingReports,
   resetDatabase,
 } from "@/services/api";
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 const statusStyles = {
   Pending: "bg-amber-100 text-amber-800",
@@ -35,6 +38,8 @@ export default function AdminDashboardPage() {
   );
   const [resetting, setResetting] = useState(false);
   const [resetConfirm, setResetConfirm] = useState(false);
+  const [revealConfirmAlertId, setRevealConfirmAlertId] = useState<string | null>(null);
+  const [revealedAlertIds, setRevealedAlertIds] = useState<Set<string>>(new Set());
 
   const loadAdminData = useCallback(
     async (silent = false) => {
@@ -123,16 +128,34 @@ export default function AdminDashboardPage() {
 
   const alertCards = useMemo(
     () =>
-      alerts.map((item) => ({
-        id: item._id,
-        confidence: Number(((item.similarity ?? 0) * 100).toFixed(1)),
-        faceScore: Number(((item.scoring?.face_score ?? 0) * 100).toFixed(1)),
-        metadataScore: Number(
-          ((item.scoring?.metadata_score ?? 0) * 100).toFixed(1),
-        ),
-        location: "AI matching event",
-        contactInfo: `Missing ID: ${item.missing_id} | Found ID: ${item.found_id}`,
-      })),
+      alerts.map((item) => {
+        const screenshotUrl = item.screenshot_url
+          ? `${API_BASE_URL}${item.screenshot_url.replace(/\\/g, "/")}`
+          : null;
+
+        const defaultLocation = item.camera_name
+          ? `Found by admin at ${item.camera_name}`
+          : "AI matching event";
+
+        const contactInfo = item.type === "webcam_match"
+          ? `Found by ${item.authority_name ?? "Admin"}${item.authority_phone ? ` • ${item.authority_phone}` : ""}`
+          : `Missing ID: ${item.missing_id} | Found ID: ${item.found_id}`;
+
+        return {
+          id: item._id,
+          confidence: Number(((item.similarity ?? 0) * 100).toFixed(1)),
+          faceScore: Number(((item.scoring?.face_score ?? 0) * 100).toFixed(1)),
+          metadataScore: Number(
+            ((item.scoring?.metadata_score ?? 0) * 100).toFixed(1),
+          ),
+          location: defaultLocation,
+          contactInfo,
+          imageUrl: screenshotUrl,
+          type: item.type,
+          authorityName: item.authority_name,
+          authorityPhone: item.authority_phone,
+        };
+      }),
     [alerts],
   );
 
@@ -149,7 +172,25 @@ export default function AdminDashboardPage() {
               Monitor case evidence feeds, active alerts, and legal workflow
               statuses.
             </p>
-            <div className="mt-3 flex items-center gap-3">
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <Link
+                href="/admin/surveillance"
+                className="rounded-lg bg-slate-700 px-4 py-2 text-xs font-bold text-white transition hover:bg-slate-600"
+              >
+                24/7 Surveillance Monitor
+              </Link>
+              <Link
+                href="/admin/cctv"
+                className="rounded-lg bg-purple-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-purple-700"
+              >
+                CCTV Control Center
+              </Link>
+              <Link
+                href="/admin/live-cam"
+                className="rounded-lg bg-cyan-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-cyan-700"
+              >
+                Live Camera Scan
+              </Link>
               <button
                 type="button"
                 onClick={() => void handleReset()}
@@ -269,17 +310,54 @@ export default function AdminDashboardPage() {
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">
                         Alert
                       </p>
-                      <p className="mt-1 text-sm text-slate-800">
+                      {alert.imageUrl ? (
+                        <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                          <img
+                            src={alert.imageUrl}
+                            alt="Webcam match screenshot"
+                            className="h-32 w-full object-cover"
+                          />
+                        </div>
+                      ) : null}
+                      <p className="mt-3 text-sm text-slate-800">
                         Confidence: {alert.confidence.toFixed(1)}%
                       </p>
                       <p className="text-xs text-slate-600">
                         Face: {alert.faceScore.toFixed(1)}% | Metadata:{" "}
                         {alert.metadataScore.toFixed(1)}%
                       </p>
-                      <p className="text-sm text-slate-700">{alert.location}</p>
-                      <p className="text-xs text-slate-600">
-                        Contact: {alert.contactInfo}
-                      </p>
+                      <p className="mt-2 text-sm text-slate-700">{alert.location}</p>
+                      {alert.type === "webcam_match" ? (
+                        <div className="mt-2 rounded-2xl bg-slate-100 p-3">
+                          {revealedAlertIds.has(alert.id) ? (
+                            <p className="text-xs text-slate-600">
+                              Admin: {alert.authorityName ?? "Admin"}
+                              {alert.authorityPhone ? ` • ${alert.authorityPhone}` : ""}
+                            </p>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (revealConfirmAlertId !== alert.id) {
+                                  setRevealConfirmAlertId(alert.id);
+                                  return;
+                                }
+                                setRevealedAlertIds((prev) => new Set(prev).add(alert.id));
+                                setRevealConfirmAlertId(null);
+                              }}
+                              className="rounded-full bg-cyan-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-700"
+                            >
+                              {revealConfirmAlertId === alert.id
+                                ? "Click again to confirm reveal"
+                                : "Reveal admin contact"}
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="mt-1 text-xs text-slate-600">
+                          Contact: {alert.contactInfo}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>

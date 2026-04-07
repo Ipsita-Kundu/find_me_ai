@@ -115,6 +115,7 @@ def create_app() -> FastAPI:
     # Ensure upload directories exist
     os.makedirs("uploads/missing", exist_ok=True)
     os.makedirs("uploads/found", exist_ok=True)
+    os.makedirs("uploads/live", exist_ok=True)
 
     # Mount uploads as static (optional: for admin/debug)
     app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")

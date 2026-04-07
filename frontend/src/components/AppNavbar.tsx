@@ -1,8 +1,8 @@
 "use client";
-
+// Fixed ARIA attributes issue
 import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -36,7 +36,6 @@ const navTabInactiveClass =
 export default function AppNavbar() {
   const pathname = usePathname();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const { isAuthenticated, user, token, logout, getDefaultDashboardPath } =
     useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -123,12 +122,18 @@ export default function AppNavbar() {
   }, [pathname]);
 
   useEffect(() => {
-    const q = searchParams.get("q") ?? "";
-    const type = searchParams.get("type");
+    if (typeof window === "undefined") {
+      return;
+    }
 
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q") ?? "";
+    const type = params.get("type");
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setReportSearch(q);
     setReportTypeFilter(type === "missing" || type === "found" ? type : "all");
-  }, [searchParams]);
+  }, [pathname]);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -183,6 +188,7 @@ export default function AppNavbar() {
 
   // Initial load + poll every 10s for real-time notification updates
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadNotifications();
     const interval = setInterval(() => void loadNotifications(), 10_000);
     return () => clearInterval(interval);
@@ -270,13 +276,32 @@ export default function AppNavbar() {
   const homeLink = visibleNavLinks.find((link) => link.label === "Home");
   const tailNavLinks = visibleNavLinks.filter((link) => link.label !== "Home");
 
+  const adminCameraLinks = user?.role === "authority" ? [
+    { label: "Surveillance", href: "/admin/surveillance" },
+    { label: "CCTV", href: "/admin/cctv" },
+  ] : [];
+
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 px-4 py-3 md:px-8">
         <Link
           href="/"
-          className="text-lg font-extrabold tracking-tight text-slate-900 md:text-xl dark:text-slate-100"
+          className="flex items-center gap-2 text-lg font-extrabold tracking-tight text-slate-900 md:text-xl dark:text-slate-100"
         >
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-2xl bg-cyan-100 text-cyan-700 dark:bg-cyan-900 dark:text-cyan-200">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-5 w-5"
+              aria-hidden="true"
+            >
+              <path d="M12 2l9 7-3 12-6-3-6 3-3-12 9-7z" />
+            </svg>
+          </span>
           FindMe AI
         </Link>
 
@@ -316,15 +341,14 @@ export default function AppNavbar() {
                 setServicesOpen((prev) => !prev);
               }}
               className={`appearance-none border-0 bg-transparent cursor-pointer ${navTabBaseClass} ${isServicesActive ? navTabActiveClass : navTabInactiveClass}`}
-              aria-haspopup="menu"
-              aria-expanded={servicesOpen}
+              aria-expanded={servicesOpen ? "true" : "false"}
               onFocus={scheduleOpenServices}
+              type="button"
             >
               Services
             </button>
             <div
               className={`${servicesOpen ? "visible opacity-100" : "invisible opacity-0"} absolute left-0 top-full z-50 mt-1 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-lg transition dark:border-slate-700 dark:bg-slate-900`}
-              role="menu"
               onMouseEnter={scheduleOpenServices}
               onMouseLeave={scheduleCloseServices}
             >
@@ -359,6 +383,34 @@ export default function AppNavbar() {
                 type="button"
                 className={`${navTabBaseClass} ${isActive ? navTabActiveClass : navTabInactiveClass}`}
               >
+                {link.label}
+              </button>
+            );
+          })}
+          {adminCameraLinks.map((link) => {
+            const isActive = pathname === link.href;
+            return (
+              <button
+                key={link.href}
+                onClick={() => handleNavTabClick(link.href, link.label)}
+                type="button"
+                className={`${navTabBaseClass} ${isActive ? navTabActiveClass : navTabInactiveClass}`}
+              >
+                <span className="mr-2 inline-flex h-4 w-4 items-center justify-center rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-3.5 w-3.5"
+                    aria-hidden="true"
+                  >
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                  </svg>
+                </span>
                 {link.label}
               </button>
             );
@@ -575,6 +627,34 @@ export default function AppNavbar() {
               >
                 {item.label}
               </Link>
+            ))}
+            {adminCameraLinks.map((link) => (
+              <button
+                key={link.href}
+                onClick={() => {
+                  setMenuOpen(false);
+                  handleNavTabClick(link.href, link.label);
+                }}
+                type="button"
+                className={`${navTabBaseClass} ${pathname === link.href ? navTabActiveClass : navTabInactiveClass}`}
+              >
+                <span className="mr-2 inline-flex h-4 w-4 items-center justify-center rounded-full bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-3.5 w-3.5"
+                    aria-hidden="true"
+                  >
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                  </svg>
+                </span>
+                {link.label}
+              </button>
             ))}
             {tailNavLinks.map((link) => (
               <button
