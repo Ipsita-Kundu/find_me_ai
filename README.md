@@ -78,8 +78,10 @@ jupyter notebook
 ---
 
 ## 📸 Sample Output
+<img width="1837" height="920" alt="image" src="https://github.com/user-attachments/assets/2181144d-7bf4-4cce-bdaa-c3b553d134b4" />
+<img width="1911" height="899" alt="image" src="https://github.com/user-attachments/assets/4b90b942-11b8-45ca-b995-5f32c906c134" />
+<img width="1899" height="904" alt="image" src="https://github.com/user-attachments/assets/34c4dd8c-40de-436f-8eee-1b57e39f0b46" />
 
-*(Add screenshots here for better presentation)*
 
 ---
 
@@ -121,7 +123,7 @@ Their combined efforts helped shape the design, functionality, and implementatio
 For queries or collaboration:
 
 * GitHub: https://github.com/Ipsita-Kundu
-
+* GitHub: https://github.com/Ishita-Kundu47
 ---
 
 ⭐ If you like this project, consider giving it a star!
