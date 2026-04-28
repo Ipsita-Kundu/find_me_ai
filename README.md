@@ -79,6 +79,7 @@ jupyter notebook
 
 ## 📸 Sample Output
 <img width="1837" height="920" alt="image" src="https://github.com/user-attachments/assets/2181144d-7bf4-4cce-bdaa-c3b553d134b4" />
+<img width="1881" height="913" alt="image" src="https://github.com/user-attachments/assets/c52c6b05-c6de-4a06-babd-f6d38768d527" />
 <img width="1911" height="899" alt="image" src="https://github.com/user-attachments/assets/4b90b942-11b8-45ca-b995-5f32c906c134" />
 <img width="1899" height="904" alt="image" src="https://github.com/user-attachments/assets/34c4dd8c-40de-436f-8eee-1b57e39f0b46" />
 
